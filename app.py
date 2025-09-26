@@ -1,9 +1,9 @@
 import os
 import logging
+import requests
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
-import openai
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -14,22 +14,43 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# Конфигурация
+# Конфигурация DeepSeek
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 ADMIN_ID = os.getenv('ADMIN_ID')
 BOT_NAME = os.getenv('BOT_NAME', 'BlockesAIBot')
 
-# Инициализация OpenAI
-openai.api_key = OPENAI_API_KEY
-
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /start"""
-    await update.message.reply_text(
-        f'🤖 Привет! Я {BOT_NAME} - бот с GPT.\n'
-        'Используйте команду /GTP "ваш вопрос" для общения со мной.\n\n'
-        'Пример: /GTP "Напиши рецепт пасты"'
-    )
+async def deepseek_chat(message):
+    """Функция для общения с DeepSeek API"""
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
+    }
+    
+    data = {
+        "model": "deepseek-chat",
+        "messages": [
+            {"role": "system", "content": "Ты полезный помощник, который отвечает на вопросы на русском языке."},
+            {"role": "user", "content": message}
+        ],
+        "max_tokens": 2000,
+        "temperature": 0.7,
+        "stream": False
+    }
+    
+    try:
+        response = requests.post(
+            "https://api.deepseek.com/v1/chat/completions",
+            headers=headers,
+            json=data,
+            timeout=30
+        )
+        response.raise_for_status()
+        result = response.json()
+        return result['choices'][0]['message']['content']
+    except Exception as e:
+        logging.error(f"DeepSeek API error: {e}")
+        return None
 
 async def gpt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /GTP"""
@@ -64,18 +85,12 @@ async def gpt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Отправляем сообщение о обработке
         processing_message = await update.message.reply_text("🤔 Думаю...")
         
-        # Генерируем ответ с помощью GPT
-        response = openai.chat.completions.create(
-            model=os.getenv('GPT_MODEL', 'gpt-3.5-turbo'),
-            messages=[
-                {"role": "system", "content": "Ты полезный помощник, который отвечает на вопросы."},
-                {"role": "user", "content": user_message}
-            ],
-            max_tokens=int(os.getenv('GPT_MAX_TOKENS', 500)),
-            temperature=float(os.getenv('GPT_TEMPERATURE', 0.7))
-        )
+        # Получаем ответ от DeepSeek
+        ai_response = await deepseek_chat(user_message)
         
-        gpt_response = response.choices[0].message.content
+        if ai_response is None:
+            await update.message.reply_text("❌ Ошибка подключения к AI. Попробуйте позже.")
+            return
         
         # Удаляем сообщение "Думаю" и отправляем ответ
         await context.bot.delete_message(
@@ -84,39 +99,44 @@ async def gpt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         # Разбиваем длинные ответы на части
-        if len(gpt_response) > 4000:
-            for i in range(0, len(gpt_response), 4000):
-                await update.message.reply_text(gpt_response[i:i+4000])
+        if len(ai_response) > 4000:
+            for i in range(0, len(ai_response), 4000):
+                await update.message.reply_text(ai_response[i:i+4000])
         else:
-            await update.message.reply_text(gpt_response)
+            await update.message.reply_text(ai_response)
         
     except Exception as e:
-        logging.error(f"Error in GPT command: {e}")
+        logging.error(f"Error in GTP command: {e}")
         await update.message.reply_text("❌ Извините, произошла ошибка. Попробуйте позже.")
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /start"""
+    await update.message.reply_text(
+        f'🤖 Привет! Я {BOT_NAME} - бот с AI.\n'
+        'Используйте команду /GTP "ваш вопрос" для общения со мной.\n\n'
+        'Пример: /GTP "Напиши рецепт пасты"'
+    )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /help"""
     help_text = f"""
 🤖 **{BOT_NAME} - Команды бота:**
 
-/GTP "ваш вопрос" - Задать вопрос GPT
+/GTP "ваш вопрос" - Задать вопрос AI
 /help - Показать эту справку
 
 **Примеры использования:**
 /GTP "Напиши рецепт пасты карбонара"
 /GTP "Объясни квантовую физику простыми словами"
+
+⚡ **Powered by DeepSeek AI**
     """
     await update.message.reply_text(help_text)
 
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик ошибок"""
-    logging.error(f"Update {update} caused error {context.error}")
-
 def main():
     """Основная функция"""
-    # Проверка наличия токенов
-    if not TELEGRAM_BOT_TOKEN or not OPENAI_API_KEY:
-        logging.error("Не установлены TELEGRAM_BOT_TOKEN или OPENAI_API_KEY")
+    if not TELEGRAM_BOT_TOKEN or not DEEPSEEK_API_KEY:
+        logging.error("Не установлены TELEGRAM_BOT_TOKEN или DEEPSEEK_API_KEY")
         return
     
     # Создание приложения
@@ -128,11 +148,8 @@ def main():
     application.add_handler(CommandHandler("GTP", gpt_command))
     application.add_handler(CommandHandler("help", help_command))
     
-    # Обработчик ошибок
-    application.add_error_handler(error_handler)
-    
     # Запуск бота
-    logging.info(f"🚀 {BOT_NAME} starting...")
+    logging.info(f"🚀 {BOT_NAME} starting with DeepSeek...")
     application.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
