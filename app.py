@@ -1,6 +1,7 @@
 import os
 import logging
 import requests
+import json
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -21,43 +22,80 @@ ADMIN_ID = os.getenv('ADMIN_ID')
 BOT_NAME = os.getenv('BOT_NAME', 'BlockesAIBot')
 
 # Детальная проверка переменных при запуске
-logging.info("=== Checking Environment Variables ===")
+logging.info("=== DeepSeek Bot Starting ===")
 logging.info(f"BOT_NAME: {BOT_NAME}")
 logging.info(f"TELEGRAM_BOT_TOKEN: {'SET' if TELEGRAM_BOT_TOKEN else 'MISSING'}")
 logging.info(f"DEEPSEEK_API_KEY: {'SET' if DEEPSEEK_API_KEY else 'MISSING'}")
-logging.info(f"ADMIN_ID: {ADMIN_ID}")
-logging.info(f"ALLOWED_GROUPS: {os.getenv('ALLOWED_GROUP_IDS', 'all')}")
 
 async def deepseek_chat(message):
-    """Функция для общения с DeepSeek API"""
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
-    }
-    
-    data = {
-        "model": "deepseek-chat",
-        "messages": [
-            {"role": "system", "content": "Ты полезный помощник, который отвечает на вопросы на русском языке."},
-            {"role": "user", "content": message}
-        ],
-        "max_tokens": 2000,
-        "temperature": 0.7,
-        "stream": False
-    }
-    
+    """Улучшенная функция для DeepSeek API"""
     try:
+        logging.info(f"Sending request to DeepSeek: {message[:50]}...")
+        
+        if not DEEPSEEK_API_KEY:
+            logging.error("DEEPSEEK_API_KEY is missing!")
+            return None
+        
+        # Проверяем формат ключа
+        if not DEEPSEEK_API_KEY.startswith('sk-'):
+            logging.error(f"Invalid API key format: {DEEPSEEK_API_KEY[:10]}...")
+            return None
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "User-Agent": "Telegram-Bot/1.0"
+        }
+        
+        data = {
+            "model": "deepseek-chat",
+            "messages": [
+                {
+                    "role": "system", 
+                    "content": "Ты полезный AI-помощник. Отвечай на русском языке кратко и понятно."
+                },
+                {
+                    "role": "user", 
+                    "content": message
+                }
+            ],
+            "max_tokens": 1024,
+            "temperature": 0.7,
+            "stream": False
+        }
+        
+        logging.info("Making request to DeepSeek API...")
+        
         response = requests.post(
             "https://api.deepseek.com/v1/chat/completions",
             headers=headers,
             json=data,
-            timeout=30
+            timeout=60  # Увеличиваем таймаут
         )
-        response.raise_for_status()
-        result = response.json()
-        return result['choices'][0]['message']['content']
+        
+        logging.info(f"Response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            if 'choices' in result and len(result['choices']) > 0:
+                ai_response = result['choices'][0]['message']['content']
+                logging.info(f"DeepSeek response: {len(ai_response)} characters")
+                return ai_response
+            else:
+                logging.error("No choices in response")
+                return None
+        else:
+            logging.error(f"DeepSeek API error {response.status_code}: {response.text}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        logging.error("DeepSeek API timeout")
+        return None
+    except requests.exceptions.ConnectionError:
+        logging.error("DeepSeek API connection error")
+        return None
     except Exception as e:
-        logging.error(f"DeepSeek API error: {e}")
+        logging.error(f"DeepSeek API unexpected error: {str(e)}")
         return None
 
 async def gpt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -86,12 +124,12 @@ async def gpt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_message = user_message[1:-1]
         
         # Проверяем длину сообщения
-        if len(user_message) > 1000:
-            await update.message.reply_text("❌ Сообщение слишком длинное. Максимум 1000 символов.")
+        if len(user_message) > 2000:
+            await update.message.reply_text("❌ Сообщение слишком длинное. Максимум 2000 символов.")
             return
         
         # Логируем запрос
-        logging.info(f"User message: {user_message[:100]}...")
+        logging.info(f"User request from {chat_id}: {user_message[:100]}...")
         
         # Отправляем сообщение о обработке
         processing_message = await update.message.reply_text("🤔 Думаю...")
@@ -100,17 +138,19 @@ async def gpt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ai_response = await deepseek_chat(user_message)
         
         if ai_response is None:
-            await update.message.reply_text("❌ Ошибка подключения к AI. Попробуйте позже.")
-            return
+            # Fallback ответ
+            ai_response = f"🤖 Привет! Я получил ваш запрос: '{user_message}'\n\n" \
+                         "В настоящее время настраиваю подключение к DeepSeek AI. " \
+                         "Попробуйте еще раз через минуту!"
         
         # Удаляем сообщение "Думаю" и отправляем ответ
-        await context.bot.delete_message(
-            chat_id=chat_id,
-            message_id=processing_message.message_id
-        )
-        
-        # Логируем ответ
-        logging.info(f"AI response length: {len(ai_response)}")
+        try:
+            await context.bot.delete_message(
+                chat_id=chat_id,
+                message_id=processing_message.message_id
+            )
+        except:
+            pass  # Игнорируем ошибки удаления сообщения
         
         # Разбиваем длинные ответы на части
         if len(ai_response) > 4000:
@@ -119,6 +159,8 @@ async def gpt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text(ai_response)
         
+        logging.info("Response sent successfully")
+        
     except Exception as e:
         logging.error(f"Error in GTP command: {e}")
         await update.message.reply_text("❌ Извините, произошла ошибка. Попробуйте позже.")
@@ -126,9 +168,10 @@ async def gpt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     await update.message.reply_text(
-        f'🤖 Привет! Я {BOT_NAME} - бот с AI.\n'
+        f'🤖 Привет! Я {BOT_NAME} - бот с DeepSeek AI.\n'
         'Используйте команду /GTP "ваш вопрос" для общения со мной.\n\n'
-        'Пример: /GTP "Напиши рецепт пасты"'
+        'Пример: /GTP "Напиши рецепт пасты"\n'
+        'Пример: /GTP "Объясни квантовую физику"'
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -142,6 +185,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **Примеры использования:**
 /GTP "Напиши рецепт пасты карбонара"
 /GTP "Объясни квантовую физику простыми словами"
+/GTP "Помоги написать код на Python"
 
 ⚡ **Powered by DeepSeek AI**
     """
@@ -160,6 +204,7 @@ def main():
     
     if not DEEPSEEK_API_KEY:
         logging.error("❌ CRITICAL: DEEPSEEK_API_KEY is not set!")
+        logging.error("❌ Get your API key from: https://platform.deepseek.com/api_keys")
         return
     
     logging.info("✅ All environment variables are set correctly")
@@ -178,7 +223,7 @@ def main():
         application.add_error_handler(error_handler)
         
         # Запуск бота
-        logging.info(f"🚀 {BOT_NAME} starting with DeepSeek...")
+        logging.info(f"🚀 {BOT_NAME} starting with DeepSeek API...")
         application.run_polling(
             drop_pending_updates=True,
             allowed_updates=Update.ALL_TYPES
