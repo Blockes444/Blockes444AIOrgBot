@@ -28,19 +28,12 @@ logging.info(f"TELEGRAM_BOT_TOKEN: {'SET' if TELEGRAM_BOT_TOKEN else 'MISSING'}"
 logging.info(f"DEEPSEEK_API_KEY: {'SET' if DEEPSEEK_API_KEY else 'MISSING'}")
 
 async def deepseek_chat(message):
-    """Улучшенная функция для DeepSeek API"""
+    """Диагностическая версия с подробным логированием"""
     try:
-        logging.info(f"Sending request to DeepSeek: {message[:50]}...")
+        logging.info(f"=== DEEPSEEK API DIAGNOSTICS ===")
+        logging.info(f"API Key: {DEEPSEEK_API_KEY[:10]}...{DEEPSEEK_API_KEY[-10:]}")
+        logging.info(f"Message: {message}")
         
-        if not DEEPSEEK_API_KEY:
-            logging.error("DEEPSEEK_API_KEY is missing!")
-            return None
-        
-        # Проверяем формат ключа
-        if not DEEPSEEK_API_KEY.startswith('sk-'):
-            logging.error(f"Invalid API key format: {DEEPSEEK_API_KEY[:10]}...")
-            return None
-
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
@@ -50,54 +43,37 @@ async def deepseek_chat(message):
         data = {
             "model": "deepseek-chat",
             "messages": [
-                {
-                    "role": "system", 
-                    "content": "Ты полезный AI-помощник. Отвечай на русском языке кратко и понятно."
-                },
-                {
-                    "role": "user", 
-                    "content": message
-                }
+                {"role": "user", "content": "Привет! Ответь коротко."}
             ],
-            "max_tokens": 1024,
-            "temperature": 0.7,
-            "stream": False
+            "max_tokens": 50,
+            "temperature": 0.7
         }
         
-        logging.info("Making request to DeepSeek API...")
+        logging.info("Sending test request to DeepSeek...")
         
         response = requests.post(
             "https://api.deepseek.com/v1/chat/completions",
             headers=headers,
             json=data,
-            timeout=60  # Увеличиваем таймаут
+            timeout=30
         )
         
-        logging.info(f"Response status: {response.status_code}")
+        logging.info(f"=== RESPONSE DETAILS ===")
+        logging.info(f"Status Code: {response.status_code}")
+        logging.info(f"Response Headers: {dict(response.headers)}")
+        logging.info(f"Response Text: {response.text}")
         
         if response.status_code == 200:
             result = response.json()
-            if 'choices' in result and len(result['choices']) > 0:
-                ai_response = result['choices'][0]['message']['content']
-                logging.info(f"DeepSeek response: {len(ai_response)} characters")
-                return ai_response
-            else:
-                logging.error("No choices in response")
-                return None
+            logging.info(f"Full Response: {json.dumps(result, ensure_ascii=False)}")
+            return "✅ DeepSeek API работает! Тестовый запрос успешен."
         else:
-            logging.error(f"DeepSeek API error {response.status_code}: {response.text}")
-            return None
+            return f"❌ Ошибка DeepSeek API: {response.status_code} - {response.text}"
             
-    except requests.exceptions.Timeout:
-        logging.error("DeepSeek API timeout")
-        return None
-    except requests.exceptions.ConnectionError:
-        logging.error("DeepSeek API connection error")
-        return None
     except Exception as e:
-        logging.error(f"DeepSeek API unexpected error: {str(e)}")
-        return None
-
+        logging.error(f"Exception: {str(e)}")
+        return f"❌ Исключение: {str(e)}"
+        
 async def gpt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /GTP"""
     try:
@@ -234,3 +210,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
