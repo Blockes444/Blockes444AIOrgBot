@@ -20,6 +20,14 @@ TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 ADMIN_ID = os.getenv('ADMIN_ID')
 BOT_NAME = os.getenv('BOT_NAME', 'BlockesAIBot')
 
+# Детальная проверка переменных при запуске
+logging.info("=== Checking Environment Variables ===")
+logging.info(f"BOT_NAME: {BOT_NAME}")
+logging.info(f"TELEGRAM_BOT_TOKEN: {'SET' if TELEGRAM_BOT_TOKEN else 'MISSING'}")
+logging.info(f"DEEPSEEK_API_KEY: {'SET' if DEEPSEEK_API_KEY else 'MISSING'}")
+logging.info(f"ADMIN_ID: {ADMIN_ID}")
+logging.info(f"ALLOWED_GROUPS: {os.getenv('ALLOWED_GROUP_IDS', 'all')}")
+
 async def deepseek_chat(message):
     """Функция для общения с DeepSeek API"""
     headers = {
@@ -82,6 +90,9 @@ async def gpt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Сообщение слишком длинное. Максимум 1000 символов.")
             return
         
+        # Логируем запрос
+        logging.info(f"User message: {user_message[:100]}...")
+        
         # Отправляем сообщение о обработке
         processing_message = await update.message.reply_text("🤔 Думаю...")
         
@@ -97,6 +108,9 @@ async def gpt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=chat_id,
             message_id=processing_message.message_id
         )
+        
+        # Логируем ответ
+        logging.info(f"AI response length: {len(ai_response)}")
         
         # Разбиваем длинные ответы на части
         if len(ai_response) > 4000:
@@ -133,24 +147,45 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     await update.message.reply_text(help_text)
 
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик ошибок"""
+    logging.error(f"Update {update} caused error {context.error}")
+
 def main():
     """Основная функция"""
-    if not TELEGRAM_BOT_TOKEN or not DEEPSEEK_API_KEY:
-        logging.error("Не установлены TELEGRAM_BOT_TOKEN или DEEPSEEK_API_KEY")
+    # Проверка наличия токенов
+    if not TELEGRAM_BOT_TOKEN:
+        logging.error("❌ CRITICAL: TELEGRAM_BOT_TOKEN is not set!")
         return
     
-    # Создание приложения
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    if not DEEPSEEK_API_KEY:
+        logging.error("❌ CRITICAL: DEEPSEEK_API_KEY is not set!")
+        return
     
-    # Добавление обработчиков
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("gpt", gpt_command))
-    application.add_handler(CommandHandler("GTP", gpt_command))
-    application.add_handler(CommandHandler("help", help_command))
+    logging.info("✅ All environment variables are set correctly")
     
-    # Запуск бота
-    logging.info(f"🚀 {BOT_NAME} starting with DeepSeek...")
-    application.run_polling(drop_pending_updates=True)
+    try:
+        # Создание приложения
+        application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+        
+        # Добавление обработчиков
+        application.add_handler(CommandHandler("start", start_command))
+        application.add_handler(CommandHandler("gpt", gpt_command))
+        application.add_handler(CommandHandler("GTP", gpt_command))
+        application.add_handler(CommandHandler("help", help_command))
+        
+        # Обработчик ошибок
+        application.add_error_handler(error_handler)
+        
+        # Запуск бота
+        logging.info(f"🚀 {BOT_NAME} starting with DeepSeek...")
+        application.run_polling(
+            drop_pending_updates=True,
+            allowed_updates=Update.ALL_TYPES
+        )
+        
+    except Exception as e:
+        logging.error(f"Failed to start bot: {e}")
 
 if __name__ == '__main__':
     main()
