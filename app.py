@@ -1,7 +1,6 @@
 import os
 import logging
 import requests
-import json
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -15,65 +14,81 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# Конфигурация DeepSeek
-DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
+# Конфигурация
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+YANDEX_API_KEY = os.getenv('YANDEX_API_KEY')  # Новый ключ!
 ADMIN_ID = os.getenv('ADMIN_ID')
 BOT_NAME = os.getenv('BOT_NAME', 'BlockesAIBot')
 
-# Детальная проверка переменных при запуске
-logging.info("=== DeepSeek Bot Starting ===")
+# Детальная проверка переменных
+logging.info("=== Yandex GPT Bot Starting ===")
 logging.info(f"BOT_NAME: {BOT_NAME}")
 logging.info(f"TELEGRAM_BOT_TOKEN: {'SET' if TELEGRAM_BOT_TOKEN else 'MISSING'}")
-logging.info(f"DEEPSEEK_API_KEY: {'SET' if DEEPSEEK_API_KEY else 'MISSING'}")
+logging.info(f"YANDEX_API_KEY: {'SET' if YANDEX_API_KEY else 'MISSING'}")
 
-async def deepseek_chat(message):
-    """Диагностическая версия с подробным логированием"""
+async def yandex_gpt(message):
+    """Функция для общения с Yandex GPT API"""
     try:
-        logging.info(f"=== DEEPSEEK API DIAGNOSTICS ===")
-        logging.info(f"API Key: {DEEPSEEK_API_KEY[:10]}...{DEEPSEEK_API_KEY[-10:]}")
-        logging.info(f"Message: {message}")
+        logging.info(f"Sending request to Yandex GPT: {message[:50]}...")
         
+        if not YANDEX_API_KEY:
+            logging.error("YANDEX_API_KEY is missing!")
+            return None
+
         headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-            "User-Agent": "Telegram-Bot/1.0"
+            "Authorization": f"Api-Key {YANDEX_API_KEY}",
+            "Content-Type": "application/json"
         }
         
         data = {
-            "model": "deepseek-chat",
+            "modelUri": "gpt://b1gvmk9u7ea7lpg4g86r/yandexgpt/latest",
+            "completionOptions": {
+                "stream": False,
+                "temperature": 0.6,
+                "maxTokens": 1000
+            },
             "messages": [
-                {"role": "user", "content": "Привет! Ответь коротко."}
-            ],
-            "max_tokens": 50,
-            "temperature": 0.7
+                {
+                    "role": "user",
+                    "text": message
+                }
+            ]
         }
         
-        logging.info("Sending test request to DeepSeek...")
+        logging.info("Making request to Yandex GPT API...")
         
         response = requests.post(
-            "https://api.deepseek.com/v1/chat/completions",
+            "https://llm.api.cloud.yandex.net/foundationModels/v1/completion",
             headers=headers,
             json=data,
             timeout=30
         )
         
-        logging.info(f"=== RESPONSE DETAILS ===")
-        logging.info(f"Status Code: {response.status_code}")
-        logging.info(f"Response Headers: {dict(response.headers)}")
-        logging.info(f"Response Text: {response.text}")
+        logging.info(f"Yandex GPT response status: {response.status_code}")
         
         if response.status_code == 200:
             result = response.json()
-            logging.info(f"Full Response: {json.dumps(result, ensure_ascii=False)}")
-            return "✅ DeepSeek API работает! Тестовый запрос успешен."
+            if 'result' in result and 'alternatives' in result['result']:
+                ai_response = result['result']['alternatives'][0]['message']['text']
+                logging.info(f"Yandex GPT response: {len(ai_response)} characters")
+                return ai_response
+            else:
+                logging.error("Unexpected response format")
+                return None
         else:
-            return f"❌ Ошибка DeepSeek API: {response.status_code} - {response.text}"
+            logging.error(f"Yandex GPT API error {response.status_code}: {response.text}")
+            return None
             
+    except requests.exceptions.Timeout:
+        logging.error("Yandex GPT API timeout")
+        return None
+    except requests.exceptions.ConnectionError:
+        logging.error("Yandex GPT API connection error")
+        return None
     except Exception as e:
-        logging.error(f"Exception: {str(e)}")
-        return f"❌ Исключение: {str(e)}"
-        
+        logging.error(f"Yandex GPT API unexpected error: {str(e)}")
+        return None
+
 async def gpt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /GTP"""
     try:
@@ -110,13 +125,13 @@ async def gpt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Отправляем сообщение о обработке
         processing_message = await update.message.reply_text("🤔 Думаю...")
         
-        # Получаем ответ от DeepSeek
-        ai_response = await deepseek_chat(user_message)
+        # Получаем ответ от Yandex GPT
+        ai_response = await yandex_gpt(user_message)
         
         if ai_response is None:
             # Fallback ответ
             ai_response = f"🤖 Привет! Я получил ваш запрос: '{user_message}'\n\n" \
-                         "В настоящее время настраиваю подключение к DeepSeek AI. " \
+                         "В настоящее время настраиваю подключение к Yandex GPT. " \
                          "Попробуйте еще раз через минуту!"
         
         # Удаляем сообщение "Думаю" и отправляем ответ
@@ -144,7 +159,7 @@ async def gpt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     await update.message.reply_text(
-        f'🤖 Привет! Я {BOT_NAME} - бот с DeepSeek AI.\n'
+        f'🤖 Привет! Я {BOT_NAME} - бот с Yandex GPT AI.\n'
         'Используйте команду /GTP "ваш вопрос" для общения со мной.\n\n'
         'Пример: /GTP "Напиши рецепт пасты"\n'
         'Пример: /GTP "Объясни квантовую физику"'
@@ -163,7 +178,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /GTP "Объясни квантовую физику простыми словами"
 /GTP "Помоги написать код на Python"
 
-⚡ **Powered by DeepSeek AI**
+⚡ **Powered by Yandex GPT**
     """
     await update.message.reply_text(help_text)
 
@@ -178,9 +193,9 @@ def main():
         logging.error("❌ CRITICAL: TELEGRAM_BOT_TOKEN is not set!")
         return
     
-    if not DEEPSEEK_API_KEY:
-        logging.error("❌ CRITICAL: DEEPSEEK_API_KEY is not set!")
-        logging.error("❌ Get your API key from: https://platform.deepseek.com/api_keys")
+    if not YANDEX_API_KEY:
+        logging.error("❌ CRITICAL: YANDEX_API_KEY is not set!")
+        logging.error("❌ Get your API key from: https://yandex.cloud/")
         return
     
     logging.info("✅ All environment variables are set correctly")
@@ -199,7 +214,7 @@ def main():
         application.add_error_handler(error_handler)
         
         # Запуск бота
-        logging.info(f"🚀 {BOT_NAME} starting with DeepSeek API...")
+        logging.info(f"🚀 {BOT_NAME} starting with Yandex GPT API...")
         application.run_polling(
             drop_pending_updates=True,
             allowed_updates=Update.ALL_TYPES
@@ -210,4 +225,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
