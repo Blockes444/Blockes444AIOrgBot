@@ -83,16 +83,13 @@ async def gpt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message_id=processing_message.message_id
         )
         
-        # Разбиваем длинные ответы на части (ограничение Telegram - 4096 символов)
+        # Разбиваем длинные ответы на части
         if len(gpt_response) > 4000:
             for i in range(0, len(gpt_response), 4000):
                 await update.message.reply_text(gpt_response[i:i+4000])
         else:
             await update.message.reply_text(gpt_response)
         
-    except openai.APIError as e:
-        logging.error(f"OpenAI API error: {e}")
-        await update.message.reply_text("❌ Ошибка API OpenAI. Проверьте баланс и настройки.")
     except Exception as e:
         logging.error(f"Error in GPT command: {e}")
         await update.message.reply_text("❌ Извините, произошла ошибка. Попробуйте позже.")
@@ -108,9 +105,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **Примеры использования:**
 /GTP "Напиши рецепт пасты карбонара"
 /GTP "Объясни квантовую физику простыми словами"
-/GTP "Помоги написать код на Python"
-
-⚡ **Бот работает в группе: {os.getenv('ALLOWED_GROUP_IDS', 'Все группы')}**
     """
     await update.message.reply_text(help_text)
 
@@ -139,12 +133,7 @@ def main():
     
     # Запуск бота
     logging.info(f"🚀 {BOT_NAME} starting...")
-    
-    # Упрощенный запуск - всегда используем polling
-    application.run_polling(
-        drop_pending_updates=True,
-        allowed_updates=Update.ALL_TYPES
-    )
+    application.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
     main()
